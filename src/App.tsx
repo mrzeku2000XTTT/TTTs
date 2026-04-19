@@ -155,7 +155,6 @@ export default function App() {
     setIsEnhancing(true);
     setError(null);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const enhanceSystemPrompt = `You are an expert Motion Design Art Director and GSAP Animation Master. The user will provide a simple idea for an animation. Your task is to 1000x their idea into a massively detailed, hyper-descriptive creative brief and choreography breakdown. 
     
 CRITICAL INSTRUCTIONS:
@@ -170,13 +169,16 @@ CRITICAL INSTRUCTIONS:
 - Enforce strict high-end editorial aesthetics: absolute positioning, massive bold Swiss typography, extreme high-contrast colors, and exquisite negative space.
 - The output should read like a demanding Hollywood creative director dictating a precise, frame-by-frame choreography brief.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: { systemInstruction: enhanceSystemPrompt },
+      const res = await fetch('/api/enhance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, systemInstruction: enhanceSystemPrompt })
       });
+      
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.details || "Enhance failed");
 
-      const enhancedText = response.text || "";
+      const enhancedText = data.text || "";
       setPrompt(enhancedText.trim());
     } catch (err: any) {
       console.error(err);
@@ -191,7 +193,6 @@ CRITICAL INSTRUCTIONS:
     setIsGenerating(true);
     setError(null);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const systemPrompt = `You are an expert Hyperframes composition creator. Hyperframes is an HTML-to-video framework.
 Rules for generating HTML:
 1. Return ONLY valid raw HTML. No markdown formatting, no \`\`\`html tags.
@@ -247,13 +248,16 @@ Rules for generating HTML:
         parts.push(finalPrompt);
       }
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: parts,
-        config: { systemInstruction: systemPrompt },
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: parts, systemInstruction: systemPrompt })
       });
+      
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.details || "Generate failed");
 
-      let html = response.text || "";
+      let html = data.text || "";
       // Clean up markdown markers if the model included them incorrectly
       html = html.replace(/^```html\s*/i, '').replace(/```\s*$/, '').trim();
 
@@ -284,9 +288,17 @@ Rules for generating HTML:
         try {
           errData = JSON.parse(errText);
         } catch {
-          throw new Error('MP4 Rendering Error. The container API is missing. Vercel Serverless removes Chromium access. Check README.');
+          throw new Error('MP4 Rendering Error: Server returned an invalid response (not JSON). The Render pipeline might have crashed or timed out.');
         }
-        throw new Error(errData.error || errData.details || 'Failed to render');
+        
+        let displayError = errData.error || 'Failed to render';
+        if (errData.details && errData.details.includes('window.__hf not ready')) {
+          displayError = "Render failed: The LLM generated an invalid layout. It must include the window.__timelines['main'] injection to sync. Try generating the code again!";
+        } else if (errData.details) {
+          displayError += ': ' + errData.details;
+        }
+
+        throw new Error(displayError);
       }
 
       const rawBlob = await res.blob();

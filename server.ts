@@ -49,6 +49,38 @@ async function startServer() {
   // Serve uploaded images securely
   app.use('/uploads', express.static(path.join(os.tmpdir(), 'uploads')));
 
+  app.post("/api/enhance", async (req, res) => {
+    try {
+      const { prompt, systemInstruction } = req.body;
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: { systemInstruction },
+      });
+      res.json({ text: response.text || "" });
+    } catch (e: any) {
+      console.error("Enhance error:", e);
+      res.status(500).json({ error: "Enhance failed", details: e.message || "Unknown API error" });
+    }
+  });
+
+  app.post("/api/generate", async (req, res) => {
+    try {
+      const { contents, systemInstruction } = req.body;
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: contents,
+        config: { systemInstruction },
+      });
+      res.json({ text: response.text || "" });
+    } catch (e: any) {
+      console.error("Generate error:", e);
+      res.status(500).json({ error: "Generate failed", details: e.message || "Unknown API error" });
+    }
+  });
+
   // API to render the hyperframe composition
   app.post("/api/render", async (req, res) => {
     const { html } = req.body;
@@ -84,7 +116,9 @@ async function startServer() {
 
       console.log(`Rendering in ${projectDir}`);
       // Render the video
+      console.log(`Executing render...`);
       await execPromise(`npx -y hyperframes render --output out.mp4`, { cwd: projectDir });
+      console.log(`Render complete!`);
 
       const videoPath = path.join(projectDir, "out.mp4");
       
