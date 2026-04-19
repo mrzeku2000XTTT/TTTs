@@ -49,38 +49,6 @@ async function startServer() {
   // Serve uploaded images securely
   app.use('/uploads', express.static(path.join(os.tmpdir(), 'uploads')));
 
-  app.post("/api/enhance", async (req, res) => {
-    try {
-      const { prompt, systemInstruction } = req.body;
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "MY_GEMINI_API_KEY" });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: { systemInstruction },
-      });
-      res.json({ text: response.text || "" });
-    } catch (e: any) {
-      console.error(e);
-      res.status(500).json({ error: "Enhance failed", details: e.message });
-    }
-  });
-
-  app.post("/api/generate", async (req, res) => {
-    try {
-      const { contents, systemInstruction } = req.body;
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "MY_GEMINI_API_KEY" });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: contents,
-        config: { systemInstruction },
-      });
-      res.json({ text: response.text || "" });
-    } catch (e: any) {
-      console.error(e);
-      res.status(500).json({ error: "Generate failed", details: e.message });
-    }
-  });
-
   // API to render the hyperframe composition
   app.post("/api/render", async (req, res) => {
     const { html } = req.body;

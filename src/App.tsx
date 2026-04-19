@@ -155,6 +155,7 @@ export default function App() {
     setIsEnhancing(true);
     setError(null);
     try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const enhanceSystemPrompt = `You are an expert Motion Design Art Director and GSAP Animation Master. The user will provide a simple idea for an animation. Your task is to 1000x their idea into a massively detailed, hyper-descriptive creative brief and choreography breakdown. 
     
 CRITICAL INSTRUCTIONS:
@@ -169,23 +170,13 @@ CRITICAL INSTRUCTIONS:
 - Enforce strict high-end editorial aesthetics: absolute positioning, massive bold Swiss typography, extreme high-contrast colors, and exquisite negative space.
 - The output should read like a demanding Hollywood creative director dictating a precise, frame-by-frame choreography brief.`;
 
-      const res = await fetch('/api/enhance', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, systemInstruction: enhanceSystemPrompt })
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: { systemInstruction: enhanceSystemPrompt },
       });
-      
-      let data;
-      const textResponse = await res.text();
-      try {
-        data = JSON.parse(textResponse);
-      } catch (e) {
-        throw new Error('API unreachable/failed parsing response. If you migrated to Vercel, the internal Express server is not supported natively. See README.');
-      }
-      
-      if (!res.ok) throw new Error(data.error || data.details || "Enhance failed");
 
-      const enhancedText = data.text || "";
+      const enhancedText = response.text || "";
       setPrompt(enhancedText.trim());
     } catch (err: any) {
       console.error(err);
@@ -200,6 +191,7 @@ CRITICAL INSTRUCTIONS:
     setIsGenerating(true);
     setError(null);
     try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const systemPrompt = `You are an expert Hyperframes composition creator. Hyperframes is an HTML-to-video framework.
 Rules for generating HTML:
 1. Return ONLY valid raw HTML. No markdown formatting, no \`\`\`html tags.
@@ -255,23 +247,13 @@ Rules for generating HTML:
         parts.push(finalPrompt);
       }
 
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: parts, systemInstruction: systemPrompt })
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: parts,
+        config: { systemInstruction: systemPrompt },
       });
-      
-      let data;
-      const textResponse = await res.text();
-      try {
-        data = JSON.parse(textResponse);
-      } catch (e) {
-        throw new Error('API unreachable. Standard Vercel exports do not execute the required intermediate Express framework. See README.');
-      }
-      
-      if (!res.ok) throw new Error(data.error || data.details || "Generate failed");
 
-      let html = data.text || "";
+      let html = response.text || "";
       // Clean up markdown markers if the model included them incorrectly
       html = html.replace(/^```html\s*/i, '').replace(/```\s*$/, '').trim();
 
