@@ -169,16 +169,14 @@ CRITICAL INSTRUCTIONS:
 - Enforce strict high-end editorial aesthetics: absolute positioning, massive bold Swiss typography, extreme high-contrast colors, and exquisite negative space.
 - The output should read like a demanding Hollywood creative director dictating a precise, frame-by-frame choreography brief.`;
 
-      const res = await fetch('/api/enhance', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, systemInstruction: enhanceSystemPrompt })
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: { systemInstruction: enhanceSystemPrompt },
       });
-      
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.details || "Enhance failed");
 
-      const enhancedText = data.text || "";
+      const enhancedText = response.text || "";
       setPrompt(enhancedText.trim());
     } catch (err: any) {
       console.error(err);
@@ -248,16 +246,14 @@ Rules for generating HTML:
         parts.push(finalPrompt);
       }
 
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: parts, systemInstruction: systemPrompt })
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: parts,
+        config: { systemInstruction: systemPrompt },
       });
-      
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.details || "Generate failed");
 
-      let html = data.text || "";
+      let html = response.text || "";
       // Clean up markdown markers if the model included them incorrectly
       html = html.replace(/^```html\s*/i, '').replace(/```\s*$/, '').trim();
 

@@ -1,5 +1,11 @@
 # Hyperframes Motion Studio
 
+> 🟥 **CRITICAL DEPLOYMENT WARNING: DO NOT DEPLOY TO VERCEL**
+> This application is **100% INCOMPATIBLE** with Vercel, Netlify, or Github Pages.
+> It requires a persistent Node.js Express server (`server.ts`) and Headless Chromium to render MP4 videos. Vercel's Serverless environment strips out the Express backend, enforces a 50MB function size limit (Chromium is 200MB+), and enforces a 10s timeout which immediately kills the rendering process. 
+> 
+> **To deploy securely:** You MUST use a containerized host like **Railway**, **Render**, **Fly.io**, or **Google Cloud Run**.
+
 An AI-powered HTML-to-Video generation platform leveraging GSAP for motion design and Google's Gemini Flash for rapid composition choreography.
 
 ## How It Works
