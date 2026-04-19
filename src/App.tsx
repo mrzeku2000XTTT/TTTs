@@ -121,7 +121,15 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ image: base64Data, mimeType: file.type })
         });
-        const data = await res.json();
+        
+        let data;
+        const textResponse = await res.text();
+        try {
+          data = JSON.parse(textResponse);
+        } catch (e) {
+          throw new Error('Server returned an invalid response. If deployed on Vercel, the API wrapper is not running. Check the README for deployment details.');
+        }
+
         if (data.url) {
           setRefImageUrl(data.url);
         } else {
@@ -166,7 +174,15 @@ CRITICAL INSTRUCTIONS:
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt, systemInstruction: enhanceSystemPrompt })
       });
-      const data = await res.json();
+      
+      let data;
+      const textResponse = await res.text();
+      try {
+        data = JSON.parse(textResponse);
+      } catch (e) {
+        throw new Error('API unreachable/failed parsing response. If you migrated to Vercel, the internal Express server is not supported natively. See README.');
+      }
+      
       if (!res.ok) throw new Error(data.error || data.details || "Enhance failed");
 
       const enhancedText = data.text || "";
@@ -244,7 +260,15 @@ Rules for generating HTML:
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: parts, systemInstruction: systemPrompt })
       });
-      const data = await res.json();
+      
+      let data;
+      const textResponse = await res.text();
+      try {
+        data = JSON.parse(textResponse);
+      } catch (e) {
+        throw new Error('API unreachable. Standard Vercel exports do not execute the required intermediate Express framework. See README.');
+      }
+      
       if (!res.ok) throw new Error(data.error || data.details || "Generate failed");
 
       let html = data.text || "";
@@ -273,7 +297,13 @@ Rules for generating HTML:
       });
 
       if (!res.ok) {
-        const errData = await res.json();
+        let errData;
+        const errText = await res.text();
+        try {
+          errData = JSON.parse(errText);
+        } catch {
+          throw new Error('MP4 Rendering Error. The container API is missing. Vercel Serverless removes Chromium access. Check README.');
+        }
         throw new Error(errData.error || errData.details || 'Failed to render');
       }
 
