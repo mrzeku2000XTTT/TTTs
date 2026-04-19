@@ -29,10 +29,10 @@ async function startServer() {
 
       const extension = mimeType.split('/')[1] || 'png';
       const fileName = `${uuidv4()}.${extension}`;
-      const publicDir = path.join(process.cwd(), 'public', 'uploads');
+      const uploadDir = path.join(os.tmpdir(), 'uploads');
       
-      await fs.mkdir(publicDir, { recursive: true });
-      const filePath = path.join(publicDir, fileName);
+      await fs.mkdir(uploadDir, { recursive: true });
+      const filePath = path.join(uploadDir, fileName);
       
       // image is expected to be a raw base64 string
       const buffer = Buffer.from(image, 'base64');
@@ -43,6 +43,41 @@ async function startServer() {
     } catch (e: any) {
       console.error(e);
       res.status(500).json({ error: "Upload failed", details: e.message });
+    }
+  });
+
+  // Serve uploaded images securely
+  app.use('/uploads', express.static(path.join(os.tmpdir(), 'uploads')));
+
+  app.post("/api/enhance", async (req, res) => {
+    try {
+      const { prompt, systemInstruction } = req.body;
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "MY_GEMINI_API_KEY" });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: { systemInstruction },
+      });
+      res.json({ text: response.text || "" });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: "Enhance failed", details: e.message });
+    }
+  });
+
+  app.post("/api/generate", async (req, res) => {
+    try {
+      const { contents, systemInstruction } = req.body;
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "MY_GEMINI_API_KEY" });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: contents,
+        config: { systemInstruction },
+      });
+      res.json({ text: response.text || "" });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: "Generate failed", details: e.message });
     }
   });
 
@@ -71,12 +106,12 @@ async function startServer() {
       await fs.writeFile(path.join(projectDir, "index.html"), html, "utf-8");
 
       // Sync public folder assets (like uploads) so hyperframes can access local image references
-      const publicUploads = path.join(process.cwd(), 'public', 'uploads');
+      const tmpUploads = path.join(os.tmpdir(), 'uploads');
       const projectUploads = path.join(projectDir, 'uploads');
       try {
-        await fs.cp(publicUploads, projectUploads, { recursive: true, force: true });
+        await fs.cp(tmpUploads, projectUploads, { recursive: true, force: true });
       } catch (err) {
-        // Ignored if public/uploads doesn't exist yet
+        // Ignored if tmp/uploads doesn't exist yet
       }
 
       console.log(`Rendering in ${projectDir}`);
