@@ -1,0 +1,6 @@
+{
+  "name": "Hyperframes Web Studio",
+  "description": "An interactive web editor to author and render HTML to MP4 video using the heygen-com/hyperframes framework directly from your browser.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

@@ -1,0 +1,15 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Temporary test and uploads
+testproj/
+test-project/
+public/uploads/
+hyperframes_repo/
+test.ts
