@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Editor from 'react-simple-code-editor';
 import Prism from 'prismjs';
 import 'prismjs/components/prism-markup';
 import 'prismjs/components/prism-css';
 import 'prismjs/components/prism-javascript';
 import 'prismjs/themes/prism-dark.css'; // Dark theme
-import { Play, Loader2, PlayCircle, Download, Sparkles, ImagePlus, X, MonitorPlay, Film } from 'lucide-react';
+import { Play, Loader2, PlayCircle, Download, Sparkles, ImagePlus, X, MonitorPlay, Film, Pause, RotateCcw } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 
 const DEFAULT_HTML = `<!doctype html>
@@ -35,6 +35,16 @@ const DEFAULT_HTML = `<!doctype html>
         align-items: center;
         width: 100%;
         height: 100%;
+      }
+      .clip {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        opacity: 0;
+        visibility: hidden;
       }
     </style>
   </head>
@@ -67,13 +77,20 @@ const DEFAULT_HTML = `<!doctype html>
       const tl = gsap.timeline({ paused: true });
       
       // Intro Animation
+      tl.set("#intro", { opacity: 1, visibility: "visible" });
       tl.from("#title", { opacity: 0, y: 100, duration: 1.5, ease: "power4.out" }, 0);
       tl.to("#title", { opacity: 0, scale: 1.2, duration: 1, ease: "power2.in" }, 3);
+      tl.to("#intro", { opacity: 0, visibility: "hidden", duration: 0.1 }, 4);
 
       // Outro Animation
+      tl.set("#outro", { opacity: 1, visibility: "visible" }, 4);
       tl.from("#subtitle", { opacity: 0, x: -100, duration: 1, ease: "power4.out" }, 4.5);
+      tl.to("#outro", { opacity: 0, visibility: "hidden", duration: 0.1 }, 8);
 
       window.__timelines["main"] = tl;
+      if (window.location.protocol !== 'file:') {
+        setTimeout(() => { tl.play(); }, 100);
+      }
     </script>
   </body>
 </html>`;
@@ -89,6 +106,8 @@ export default function App() {
   const [compType, setCompType] = useState('Cinematic Flow');
   const [previewTab, setPreviewTab] = useState<'live' | 'mp4'>('live');
   const [iframeKey, setIframeKey] = useState(0); // Used to force reload iframe
+  const [enableTTS, setEnableTTS] = useState(false);
+  const [audioVibe, setAudioVibe] = useState('');
   
   // prompt state
   const [prompt, setPrompt] = useState('');
@@ -96,10 +115,128 @@ export default function App() {
   const [isEnhancing, setIsEnhancing] = useState(false);
   
   // Image reference state
-  const [refImageBase64, setRefImageBase64] = useState<string | null>(null);
-  const [refImageMime, setRefImageMime] = useState<string | null>(null);
-  const [refImageUrl, setRefImageUrl] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<{url: string, base64: string, mimeType: string, source?: string}[]>([]);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [scrapeUrlInput, setScrapeUrlInput] = useState('');
+  const [isScraping, setIsScraping] = useState(false);
+
+  // Live Preview Control State
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const requestRef = useRef<number>();
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [currentTime, setCurrentTime] = useState(0);
+
+  const handleScrapeWebsite = async () => {
+    if (!scrapeUrlInput) return;
+    setIsScraping(true);
+    let target = scrapeUrlInput;
+    if (!target.startsWith('http')) {
+      target = 'https://' + target;
+    }
+    
+    // Auto-update prompt & layout type specifically for scraping 8-10 slides
+    if (prompt.trim() === '' || prompt.includes("A cinematic product presentation video for")) {
+      setPrompt(`Create a dynamic, 8-10 slide cinematic commercial for ${target}. Extract the precise brand colors, tone, and visual identity from the attached screenshots of its various pages. Break down the product into high-impact value props and design each slide meticulously!`);
+    }
+    setCompType('8-10 HTML Slides');
+
+    try {
+      const res = await fetch('/api/scrape-website', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: target })
+      });
+      const data = await res.json();
+      if (data.images && data.images.length > 0) {
+        setAttachments(prev => [...prev, ...data.images]);
+      }
+    } catch (err) {
+      console.error("Scraping failed:", err);
+      alert("Failed to scrape website.");
+    } finally {
+      setIsScraping(false);
+      setScrapeUrlInput('');
+    }
+  };
+
+  // Dynamic iframe scaling layout constraint
+  const [iframeScale, setIframeScale] = useState(1);
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const observer = new ResizeObserver((entries) => {
+      if (entries[0]) {
+        // The container is aspect-[16/9] and sized by flexbox
+        // We match scale inversely to 1920 base resolution so it draws pixel-perfectly without cutoffs
+        setIframeScale(entries[0].contentRect.width / 1920);
+      }
+    });
+    if (previewContainerRef.current) {
+      observer.observe(previewContainerRef.current);
+    }
+    return () => observer.disconnect();
+  }, [previewTab]);
+
+  useEffect(() => {
+    const updateProgress = () => {
+      try {
+        const win = iframeRef.current?.contentWindow as any;
+        if (win && win.__timelines && win.__timelines["main"]) {
+          setCurrentTime(win.__timelines["main"].time());
+          setIsPlaying(!win.__timelines["main"].paused());
+        }
+      } catch (e) {
+        // Ignore cross-origin issues
+      }
+      requestRef.current = requestAnimationFrame(updateProgress);
+    };
+    requestRef.current = requestAnimationFrame(updateProgress);
+    return () => {
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+    };
+  }, []);
+
+  const togglePlay = () => {
+    const win = iframeRef.current?.contentWindow as any;
+    if (win?.__timelines?.main) {
+      const audios = win.document.querySelectorAll('audio');
+      if (win.__timelines.main.paused()) {
+        win.__timelines.main.play();
+        audios.forEach((a: any) => a.play().catch(() => {}));
+      } else {
+        win.__timelines.main.pause();
+        audios.forEach((a: any) => a.pause());
+      }
+    }
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = parseFloat(e.target.value);
+    setCurrentTime(val);
+    const win = iframeRef.current?.contentWindow as any;
+    if (win?.__timelines?.main) {
+      win.__timelines.main.pause();
+      win.__timelines.main.seek(val);
+      const audios = win.document.querySelectorAll('audio');
+      audios.forEach((a: any) => {
+        a.currentTime = val;
+        a.pause();
+      });
+    }
+  };
+
+  const resetAndPlay = () => {
+    const win = iframeRef.current?.contentWindow as any;
+    if (win?.__timelines?.main) {
+      win.__timelines.main.seek(0);
+      win.__timelines.main.play();
+      const audios = win.document.querySelectorAll('audio');
+      audios.forEach((a: any) => {
+        a.currentTime = 0;
+        a.play().catch(() => {});
+      });
+    }
+  };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -111,8 +248,6 @@ export default function App() {
       // Extract base64 without data prefix
       const base64Data = result.split(',')[1];
       
-      setRefImageBase64(base64Data);
-      setRefImageMime(file.type);
       setIsUploadingImage(true);
 
       try {
@@ -131,7 +266,7 @@ export default function App() {
         }
 
         if (data.url) {
-          setRefImageUrl(data.url);
+          setAttachments(prev => [...prev, { url: data.url, base64: base64Data, mimeType: file.type }]);
         } else {
           console.error("No URL returned from upload");
         }
@@ -144,10 +279,8 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  const removeImage = () => {
-    setRefImageBase64(null);
-    setRefImageMime(null);
-    setRefImageUrl(null);
+  const removeImage = (index: number) => {
+    setAttachments(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleEnhancePrompt = async () => {
@@ -161,18 +294,52 @@ CRITICAL INSTRUCTIONS:
 - Output ONLY the expanded natural language prompt. No HTML, no code.
 - Write a long, extensive brief (around 400-600 words) completely replacing the original prompt.
 - Architecture: The target composition length is ${duration} seconds. Format it as a "${compType}". Break the scene down accordingly (e.g., if it's 8-10 HTML slides, describe the exact pacing for 8 to 10 sequential scenes over ${duration} seconds).
-- Audio & Sound Design: Explicitly describe the driving Soundtrack profile. Explain EXACTLY how the key visual sweeps and text hits will sync.
-- Image Generation: Explicitly describe the generated imagery for the background or focus of EACH slide. Formulate realistic subjects and settings. Explain how the images will be generated via contextual placeholder URLs (e.g. 'https://picsum.photos/seed/[descriptive-keyword-here]/1920/1080') for each individual scene.
+- Simulated UI Walkthrough: If the user provided a scraped website and wants a multi-slide video, you MUST explicitly dictate that the GSAP animation will simulate a real user navigating the web app! Dictate the creation of a fake SVG mouse cursor (\`<div class="cursor">\`), and describe EXACTLY how the cursor will animate across the screen (\`x\`, \`y\` coordinates), hover, and "click" (scale down) to trigger the transitions between the 8 different feature pages/slides!
+           
+- Image Context: If the user explicitly provided a reference image or scraped website screenshots, you MUST visually analyze the image data! Explicitly extract the primary brand colors (e.g., specific neon greens, dark navys), font styles, and vibe. Dictate that the final animation MUST use these exact extracted design tokens so it natively matches the provided brand!
+- Audio & Sound Design: Explicitly describe the driving Soundtrack profile. The user requested this vibe: "${audioVibe || 'Cinematic / Upbeat'}". Explain EXACTLY how the key visual sweeps and text hits will sync to this track!
+${enableTTS ? `- Voiceover (TTS): The user explicitly requested an A.I. Voiceover script. You MUST write a compelling, high-energy narrator script that perfectly matches the visuals and the duration of the video. Dictate exactly when the voiceover speaks and when it pauses.` : ''}
+- Image Generation: Explicitly describe the generated imagery for the background or focus of EACH slide. Formulate realistic subjects and settings. Explain how the images will be generated using the Pollinations AI URL structure (\`https://image.pollinations.ai/prompt/{URL_ENCODED_PROMPT}?width=1920&height=1080&nologo=true\`).
 - Dictate specific, real motion mathematics and GSAP constants: exact easing curves (e.g., 'expo.inOut', 'power4.out', 'back.out(1.7)', 'elastic.out(1, 0.3)'), timeline overlap parameters (like '-=0.5', '<0.1'), and stagger amounts.
 - Demand advanced visual hooks: span-wrapped typography for staggered character-by-character reveals, ultra-smooth 3D hardware transforms (rotationX, skewX, scale with transformOrigin adjustments).
 - Mandate optical depth techniques: dynamic blur focus-pulls (filter: blur(20px) to 0), and sharp CSS clip-path polygon sweeps for element reveals.
 - Enforce strict high-end editorial aesthetics: absolute positioning, massive bold Swiss typography, extreme high-contrast colors, and exquisite negative space.
-- The output should read like a demanding Hollywood creative director dictating a precise, frame-by-frame choreography brief.`;
+
+THE 4 LAYERS OF MOTION DESIGN (YOU MUST ENFORCE THESE IN YOUR BRIEF):
+1. Physical Layer: Dictate precision in easing curves (cubic-bezier, expo, elastic), physics simulation, spring dynamics, inertia, and overshoot.
+2. Compositional Layer: Dictate stagger timing, element hierarchy, choreography, and rhythm.
+3. Narrative Layer: Dictate alignment with emotional intent, brand voice, and guiding viewer attention.
+4. Technical Layer: Demand mastery of precise tool syntax (GSAP constants).
+
+KEY TERMINOLOGY & STANDARDS TO DEMAND:
+- Kinetic Typography: Dictate explosive, manual character-by-character JS Splitting text techniques. Do not treat text as solid blocks.
+- Multi-Plane Depth & Parallax: Dictate animating background, mid-ground, and foreground elements simultaneously at slightly different speeds.
+- Whip Pans & Hard Cuts: Demand aggressive, rapid scene transitions utilizing \`expo.inOut\` to whip between frames.
+- Overshoot: Allow animations to exceed target values slightly before settling to create an elastic, organic feel.
+- Stagger: Always apply sequential delays to grouped elements (e.g., \`stagger: { amount: 0.8 }\`).
+- Easing Profiles: Never use default linear or ease-in-out without intention. Drive momentum with specific mathematical curves (e.g., GSAP's \`expo.out\`, \`power4.inOut\`, \`back.out(1.7)\`, \`elastic.out(1, 0.3)\`).
+- Motion Blur & Depth: Simulate real-world camera exposure using dynamic CSS \`filter: blur(20px)\` fading to \`0px\`.
+
+- The output should read like a demanding Hollywood creative director dictating a precise, frame-by-frame choreography brief using the motion physics above!`;
 
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const parts: any[] = [{ text: prompt }];
+
+      if (attachments.length > 0) {
+        attachments.forEach((att, index) => {
+          parts.push({
+            inlineData: {
+              data: att.base64,
+              mimeType: att.mimeType,
+            }
+          });
+        });
+        parts[0].text += `\n\n[CONTEXT]: Examine the attached reference images or scraped website pages. Extract the brand colors, typography style, and mood to incorporate directly into the art direction brief! If directing a walkthrough, explicitly dictate the sequence using the provided images numbering (Image 1, Image 2, etc.).`;
+      }
+
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: prompt,
+        contents: parts,
         config: { systemInstruction: enhanceSystemPrompt },
       });
 
@@ -191,6 +358,8 @@ CRITICAL INSTRUCTIONS:
     setIsGenerating(true);
     setError(null);
     try {
+      let isUsingScrapedImages = attachments.length > 0;
+      
       const systemPrompt = `You are an expert Hyperframes composition creator. Hyperframes is an HTML-to-video framework.
 Rules for generating HTML:
 1. Return ONLY valid raw HTML. No markdown formatting, no \`\`\`html tags.
@@ -199,6 +368,8 @@ Rules for generating HTML:
 4. Clip elements inside root must have: class="clip", data-start (in seconds), data-duration (in seconds), data-track-index.
    Example: <div id="title" class="clip" data-start="0" data-duration="5" data-track-index="0" style="position: absolute; width: 100%; height: 100%;">...</div>
 5. Include a dark inline style background #080808 by default for the body.
+   - STACKING & VISIBILITY: You MUST include this CSS block: \`.clip { position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: hidden; opacity: 0; visibility: hidden; }\`. 
+   - In your GSAP timeline, you MUST orchestrate the entry and exit of every clip: \`tl.to("#clipId", { opacity: 1, visibility: "visible", duration: 0.1 }, startTime)\` and \`tl.to("#clipId", { opacity: 0, visibility: "hidden", duration: 0.1 }, endTime)\`. This prevents overlapping UI from different scenes.
 6. You MUST load GSAP using exactly: <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
 7. At the end of the <body>, you MUST include this inline script exact structure:
 <script>
@@ -206,44 +377,75 @@ Rules for generating HTML:
   const tl = gsap.timeline({ paused: true });
   // Add your gsap animations to 'tl' here
   window.__timelines["main"] = tl;
+  window.__hf = { duration: ${duration}, seek: (t) => { tl.seek(t); } };
+  if (window.location.protocol !== 'file:') {
+    setTimeout(() => { 
+      tl.play(); 
+      document.querySelectorAll('audio').forEach(a => a.play().catch(()=>{}));
+    }, 100);
+  }
 </script>
 8. COMPOSITION TYPES & AUDIO RULES:
-   - FORMAT TYPE: ${compType}. ${compType === '8-10 HTML Slides' ? "The user specifically requested an 8-10 slide presentation. You MUST divide the content into 8 to 10 distinct `<div class='clip scene-container'>` scenes. Time them sequentially over the " + duration + "-second duration." : "Create a cinematic sequence of scenes."}
-   - You MUST include a soundtrack by putting an \`<audio>\` element in the root. Use one of these royalty-free URLs:
+   - FORMAT TYPE: ${compType}. ${compType === '8-10 HTML Slides' ? "The user specifically requested an 8-10 slide presentation. You MUST divide the content into 8 to 10 distinct `<div class='clip scene-container'>` scenes. Time them sequentially over the " + duration + "-second duration. If you are simulating a website or product walkthrough, CREATE a fake SVG mouse cursor (`<div id='cursor'>`), animate its `x` and `y` properties with GSAP, simulate hover states, and use a scale down/up bounce to simulate 'clicks' transitioning between slides!" : "Create a cinematic sequence of scenes."}
+   - USER AUDIO VIBE: The user requested the following audio vibe: "${audioVibe || 'High Energy / Electronic'}".
+   - You MUST include a soundtrack by putting an \`<audio>\` element in the root. Based on the requested vibe, pick the most appropriate royalty-free URL (or find another standard one):
      * High Energy/Electronic: \`https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3\`
      * Chill/Ambient: \`https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3\`
      * Driving/Upbeat: \`https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3\`
      Set it to \`autoplay loop\`.
    - Choreograph your timeline hits (\`tl.to(...)\`) to visually pulse or transition along with the implied beat of the audio track you selected.
+${enableTTS ? `   - VOICEOVER TTS: The user enabled AI voiceover! You MUST write a compelling narrator script that matches the duration of the clip. To implement the TTS, insert an \`<audio>\` element formatted EXACTLY like this: \`<audio src="https://api.streamelements.com/kappa/v2/speech?voice=Brian&text={URL_ENCODED_SCRIPT_HERE}"></audio>\` (Do NOT add autoplay attribute).
+     * ⚡ CRITICAL: The \`text\` parameter MUST BE STRICTLY URL ENCODED! Replace all spaces with \`%20\`, commas with \`%2C\`, etc. 
+     * Example: \`<audio src="https://api.streamelements.com/kappa/v2/speech?voice=Brian&text=Welcome%20to%20the%20future%20of%20design%2E"></audio>\`` : ''}
 9. 1000X MOTION DESIGN RULES: 
-   - Never use default easings. Use advanced easing curves: 'expo.out', 'expo.inOut', 'power4.out', 'back.out(1.7)', 'elastic.out(1, 0.3)'.
-   - Use complex position parameters for overlapping motions: \`"-=0.5"\`, \`"<"\` (start at same time as previous), \`"<0.2"\`.
-   - Leverage staggers heavily for elements (e.g. \`stagger: { amount: 0.8, from: "center", ease: "power2.out" }\`). 
-   - Write custom JS in your script tag to split text into words or characters (wrapped in spans) BEFORE animating, if applicable, so you can stagger-reveal typography beautifully.
-   - Use dynamic transform capabilities: \`rotationX\`, \`rotationY\`, \`skewX\`, \`scale\`. Combine them with \`transformOrigin: "50% 100%"\` for weight.
-   - Employ modern tricks like animating \`clipPath: "polygon(0% 100%, 100% 100%, 100% 100%, 0% 100%)"\` to \`polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)\` for slick reveal sweeps.
-   - Use \`filter: "blur(20px)"\` to \`filter: "blur(0px)"\` transitions to create optical motion depth.
-10. IMAGE GENERATION RULES: 
-   - If generating "8-10 HTML Slides" or any multi-scene layout, you MUST generate high-quality photography for EACH slide!
-   - To do this, insert an \`<img>\` tag into each slide and use \`https://picsum.photos/seed/{custom_keyword}/1920/1080?blur=4\` as the \`src\`.
-   - IMPORTANT: Replace \`{custom_keyword}\` with a highly specific, unique word reflecting that exact slide's content (e.g., \`seed/cyberpunk/1920/1080\`, \`seed/ocean/1920/1080\`, \`seed/workspace/1920/1080\`). This dynamically 'generates' distinct thematic images perfectly suited for the slide deck!
-   - ALWAYS map these images into the background utilizing \`object-fit: cover\`, and animate them smoothly (like a slow pan or scale from 1.2 to 1).
+   - KINETIC TYPOGRAPHY IS MANDATORY: You MUST write custom JS inside your script tag to split heading strings into individual \`<span>\` characters BEFORE animating. Example: \`const text = document.querySelector("#title"); text.innerHTML = text.textContent.split("").map(c => "<span style='display:inline-block; opacity:0;'>" + (c===" " ? "&nbsp;" : c) + "</span>").join(""); tl.fromTo("#title span", {opacity:0, y:50, rotationX:-90}, {opacity:1, y:0, rotationX:0, stagger:0.02, ease:"back.out(1.7)", duration:0.8})\`.
+   - PARALLAX & MULTI-PLANE: Abstract your scenes into Foreground, Midground, and Background layers. Shift them on the Z-axis or animate their Y-axis at staggeringly different speeds (e.g. background moves -50px, foreground moves -150px) to simulate massive 3D camera depth!
+   - KINEMATICS & EASINGS: NEVER use default easings. Use \`expo.out\`, \`power4.inOut\`, \`back.out(1.7)\`, or \`elastic.out(1, 0.3)\`. Demand overshoot!
+   - OVERLAPPING CHOREOGRAPHY: Use complex position parameters like \`"-=0.5"\`, \`"<"\`, \`"<0.2"\` so elements flow organically into one another instead of waiting rigidly.
+   - OPTICAL FOCUS PULLS: Animate CSS \`filter: blur(20px)\` to \`blur(0px)\` to simulate a camera lens hunting for focus.
+   - SLICK REVEALS: Animate \`clipPath: polygon(0% 100%, 100% 100%, 100% 100%, 0% 100%)\` to \`polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)\`.
+   - EXPERT PHYSICS: Always append \`force3D: true\` to your tweens to trigger GPU hardware acceleration! Combine transforms like \`rotationX\`, \`rotationY\`, \`scale\`, and \`transformOrigin: "50% 100%"\` to give elements physical weight!
+   - CINEMATIC TEXTURE: Inject a CSS pseudo-element overlay covering the body with subtle animated visual grain/noise and a vignette to make the pure HTML feel like a real camera lens!
+10. IMAGE & CAMERA MOVEMENT RULES:
+${
+  isUsingScrapedImages 
+  ? `   - IMPORTANT: The user has attached actual screenshot images of a website to use. DO NOT generate fake images with Pollinations AI. Instead, use ONLY the exact image URLs provided in the user prompt! Map them cleanly using \`<img src="..." style="width: 100%; height: 100%; object-fit: cover;" />\` into your scenes.
+   - ⚡ CRITICAL CAMERA REQUIREMENT: You MUST animate every single image continuously across the complete duration of its parent scene to simulate a cinematic camera move (Ken Burns style)! Example: \`tl.fromTo("#img1", { scale: 1.15, y: 50 }, { scale: 1, y: -50, duration: 4, ease: "none" },...)\` It should glide constantly, DO NOT let it sit still.`
+  : `   - If generating "8-10 HTML Slides" or any multi-scene layout, you MUST generate high-quality photography for EACH slide!
+   - To do this, insert an \`<img>\` tag into each slide. You MUST use the free Pollinations AI image generator API by setting the \`src\` exactly matching this pattern: \`https://image.pollinations.ai/prompt/{detailed_visual_description_URL_encoded}?width=1920&height=1080&nologo=true\`
+   - IMPORTANT: Replace \`{detailed_visual_description_URL_encoded}\` with a highly specific, unique, URL-encoded prompt reflecting that exact slide's content (e.g., \`a%20sleek%20cyberpunk%20terminal%20glowing%20in%20a%20dark%20room\`). This dynamically 'generates' a brand new, explicit AI image perfectly suited for that slide!
+   - ⚡ CRITICAL CAMERA REQUIREMENT: ALWAYS animate these background images to simulate a sweeping cinematic camera! Apply a massive, slow, continuous GSAP tween spanning the entire duration of the clip (e.g., pan on the Y axis, or slow scale from 1.2 to 1 over the full duration utilizing \`ease: "none"\` or \`ease: "sine.inOut"\`). Do not let images sit static.`
+}
 11. Make the layout aesthetically similar to a modern editorial layout. Omit generic blocks. Use high contrast, Helvetica / Arial. Return only the raw HTML text string.`;
 
       let finalPrompt = prompt;
       const parts: any[] = [];
       
-      if (refImageUrl && refImageBase64 && refImageMime) {
-        finalPrompt += `\n\n[USER INSTRUCTION]: I uploaded a reference image. URL: "${refImageUrl}". You MUST feature this prominently inside the video. Render it using an <img src="${refImageUrl}" /> inside your clips. To ensure it renders flawlessly, ALWAYS firmly style the img with \`object-fit: cover; width: 100%; height: 100%; position: absolute;\` (or appropriate precise focal sizing within a stylish container block), and apply an elegant GSAP reveal to it (like a smooth scale-in or optical blur to 0 fade).`;
-        parts.push(finalPrompt);
-        parts.push({
-          inlineData: {
-            data: refImageBase64,
-            mimeType: refImageMime,
-          }
+      if (attachments.length > 0) {
+        finalPrompt += `\n\n[USER INSTRUCTION]: I uploaded ${attachments.length} reference images. You MUST feature them prominently inside the video. Render them using \`<img src="..." />\` inside your clips. To ensure they are FULLY visible and not aggressively cropped or zoomed-in, ALWAYS style the imgs with \`object-fit: cover; width: 100%; height: 100%; position: absolute;\` (or elegantly frame them inside a stylized container floating in the scene). 
+⚡ CRITICAL: You MUST apply a continuous "Gliding Camera" GSAP animation to EVERY image! Use \`tl.fromTo(..., { scale: 1.15, y: 50 }, { scale: 1, y: -50, duration: clipDuration, ease: "none" }, ...)\` to make sure the images are constantly moving and panning across the screen. DO NOT leave them statically sitting there!`;
+        
+        let urls = attachments.map((a, index) => {
+            let fullUrl = a.url;
+            if (fullUrl.startsWith('/')) {
+              fullUrl = window.location.origin + fullUrl;
+            }
+            return `Image ${index + 1}: ${fullUrl}`;
+        }).join('\n');
+        
+        finalPrompt += `\n\nThe image URLs to use in your GSAP code are:\n${urls}\nMake sure to use the exact matching URL when referring to a specific Image #.`;
+        
+        parts.push({ text: finalPrompt });
+        attachments.forEach(att => {
+            parts.push({
+              inlineData: {
+                data: att.base64,
+                mimeType: att.mimeType,
+              }
+            });
         });
       } else {
-        parts.push(finalPrompt);
+        parts.push({ text: finalPrompt });
       }
 
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -254,11 +456,14 @@ Rules for generating HTML:
       });
 
       let html = response.text || "";
-      // Clean up markdown markers if the model included them incorrectly
-      html = html.replace(/^```html\s*/i, '').replace(/```\s*$/, '').trim();
+      // Smart extraction to grab just the HTML code if the model wrapped it in markdown
+      const match = html.match(/```(?:html)?\s*([\s\S]*?)```/);
+      if (match) {
+        html = match[1];
+      }
+      html = html.trim();
 
       setCode(html);
-      setPrompt('');
     } catch (err: any) {
       console.error(err);
       setError(err.message);
@@ -310,19 +515,19 @@ Rules for generating HTML:
   };
 
   return (
-    <div className="flex flex-col h-screen bg-[#080808] text-[#ffffff] font-['Helvetica_Neue',Helvetica,Arial,sans-serif]">
-      <header className="flex items-center justify-between px-10 h-[80px] bg-[#080808] border-b border-[#222222]">
+    <div className="flex flex-col h-screen bg-[#080808] text-[#ffffff] font-['Space_Grotesk',system-ui,sans-serif]">
+      <header className="flex flex-col sm:flex-row items-center justify-between px-6 sm:px-10 py-4 sm:h-[80px] bg-[#080808] border-b border-[#222222] gap-4 sm:gap-0">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 border border-[#666666] flex items-center justify-center">
-            <PlayCircle className="w-5 h-5 text-[#ffffff]" />
+          <div className="w-8 h-8 border border-[#555] flex items-center justify-center rounded-sm bg-[#111]">
+            <PlayCircle className="w-5 h-5 text-[#fff]" />
           </div>
-          <h1 className="text-[24px] font-[900] tracking-[-1px] uppercase text-[#ffffff]">Hyperframes Studio</h1>
+          <h1 className="text-[20px] sm:text-[24px] font-[700] tracking-tight text-[#ffffff]">Hyperframes Studio</h1>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center w-full sm:w-auto">
           <button
             onClick={handleRender}
             disabled={isRendering}
-            className="flex items-center gap-2 px-6 py-4 bg-[#ffffff] text-[#080808] text-[12px] font-[700] uppercase tracking-[2px] border-none hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center justify-center w-full sm:w-auto gap-2 px-6 py-3 sm:py-4 bg-[#ffffff] text-[#080808] text-[12px] font-[700] uppercase tracking-wide rounded-sm hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isRendering ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -334,55 +539,75 @@ Rules for generating HTML:
         </div>
       </header>
 
-      <main className="flex flex-1 overflow-hidden bg-[#222222] gap-[1px]">
+      <main className="flex flex-col lg:flex-row flex-1 overflow-hidden bg-[#222222] gap-[1px]">
         {/* Editor Pane */}
-        <section className="flex flex-col flex-1 bg-[#121212] overflow-hidden">
+        <section className="flex flex-col flex-1 lg:w-1/2 bg-[#0c0c0c] overflow-y-auto lg:overflow-hidden">
           {/* AI Generation Box */}
-          <div className="px-10 py-6 bg-[#080808] border-b border-[#222222] flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] uppercase tracking-[1px] text-[#666666]">Generation Prompt</span>
+          <div className="px-6 py-6 sm:px-10 sm:py-8 bg-[#0a0a0a] border-b border-[#222222] flex flex-col gap-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <span className="text-[12px] font-medium tracking-wide text-[#888888]">Scene Generator</span>
               
               {/* Settings Configuration */}
-              <div className="flex items-center gap-4 text-[10px] uppercase tracking-[1px] text-[#888888]">
-                <div className="flex items-center gap-2">
-                  <label>Duration (sec):</label>
+              <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-[11px] font-medium tracking-wide text-[#777]">
+                <div className="flex items-center gap-2 bg-[#141414] border border-[#222] px-3 py-1.5 rounded-sm">
+                  <label className="text-[#999]">Duration (s)</label>
                   <input 
                     type="number" 
                     value={duration} 
                     onChange={e => setDuration(Number(e.target.value))} 
-                    className="w-12 bg-[#1a1a1a] border border-[#333333] text-white px-2 py-1 outline-none text-center" 
+                    className="w-10 bg-transparent text-white outline-none text-center font-mono" 
                     min="1" 
                     max="60" 
                   />
                 </div>
-                <div className="flex items-center gap-2">
-                  <label>Layout Type:</label>
+                <div className="flex items-center gap-2 bg-[#141414] border border-[#222] px-3 py-1.5 rounded-sm">
+                  <label className="text-[#999]">Layout</label>
                   <select 
                     value={compType} 
                     onChange={e => setCompType(e.target.value)} 
-                    className="bg-[#1a1a1a] border border-[#333333] text-white px-2 py-1 outline-none appearance-none cursor-pointer"
+                    className="bg-transparent text-white outline-none appearance-none cursor-pointer"
                   >
                     <option value="Cinematic Flow">Cinematic Flow</option>
                     <option value="8-10 HTML Slides">8-10 HTML Slides</option>
                     <option value="Single Scene">Single Scene</option>
                   </select>
                 </div>
+                <div className="flex items-center gap-2 bg-[#141414] border border-[#222] px-3 py-1.5 rounded-sm">
+                  <label className="text-[#999] cursor-pointer flex items-center gap-1.5">
+                    <input 
+                      type="checkbox" 
+                      checked={enableTTS} 
+                      onChange={e => setEnableTTS(e.target.checked)} 
+                      className="accent-white" 
+                    />
+                    A.I. Voiceover (TTS)
+                  </label>
+                </div>
               </div>
             </div>
 
-            <div className="flex items-start gap-4">
-              <div className="flex-1 flex flex-col gap-3">
+            <div className="flex flex-col gap-4">
+              <div className="w-full flex-col gap-3">
                 <textarea 
                   value={prompt}
                   onChange={e => setPrompt(e.target.value)}
-                  placeholder="A product intro with a dark background and sliding captions..."
-                  className="bg-transparent border-l-2 border-[#ffffff] pl-5 text-[18px] leading-[1.4] font-normal text-[#cccccc] focus:outline-none resize-y min-h-[120px] max-h-[300px]"
+                  placeholder="Describe your motion concept... e.g. A dark, cinematic product intro with sliding captions..."
+                  className="w-full bg-transparent border-l-2 border-[#444] hover:border-[#888] focus:border-[#fff] pl-4 text-[16px] sm:text-[18px] leading-relaxed font-normal text-[#eee] focus:outline-none resize-y min-h-[100px] sm:min-h-[120px] transition-colors"
                 />
+                <div className="mt-3 mb-2 flex items-center border-l-2 border-[#333] pl-4">
+                  <input 
+                    type="text" 
+                    value={audioVibe}
+                    onChange={e => setAudioVibe(e.target.value)}
+                    placeholder="Audio Vibe: e.g. Cyberpunk synthwave, calm corporate piano, aggressive trap beat..."
+                    className="w-full bg-transparent text-[13px] text-[#aaa] placeholder-[#555] focus:outline-none focus:text-[#fff]"
+                  />
+                </div>
                 {/* Image Attachment Preview */}
-                <div className="pl-5 flex items-center gap-3">
-                  <label className="cursor-pointer flex items-center gap-2 text-[#888888] hover:text-[#cccccc] transition-colors text-[10px] font-bold uppercase tracking-[1px]">
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <label className="cursor-pointer flex items-center gap-2 text-[#888888] hover:text-[#cccccc] transition-colors text-[11px] font-medium uppercase tracking-wide bg-[#1a1a1a] border border-[#333] px-3 py-2 rounded-sm hover:bg-[#222]">
                     {isUploadingImage ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImagePlus className="w-4 h-4" />}
-                    <span>{isUploadingImage ? 'Uploading...' : 'Attach Reference Image'}</span>
+                    <span>{isUploadingImage ? 'Uploading...' : 'Attach Image'}</span>
                     <input 
                       type="file" 
                       accept="image/*" 
@@ -391,43 +616,62 @@ Rules for generating HTML:
                       disabled={isUploadingImage}
                     />
                   </label>
-                  {refImageUrl && !isUploadingImage && (
-                    <div className="flex items-center gap-2 bg-[#222222] border border-[#444444] px-2 py-1 rounded">
-                      <img src={refImageUrl} alt="Reference" className="w-6 h-6 object-cover rounded-sm" />
-                      <span className="text-[10px] text-[#aaaaaa]">Attached</span>
-                      <button onClick={removeImage} className="hover:text-white text-[#888888]">
+                  
+                  <div className="flex items-center gap-2 bg-[#1a1a1a] border border-[#333] px-3 py-1 rounded-sm focus-within:border-[#555] transition-colors">
+                    <input 
+                      type="text" 
+                      value={scrapeUrlInput}
+                      onChange={e => setScrapeUrlInput(e.target.value)}
+                      placeholder="Or extract from URL..."
+                      className="bg-transparent text-[11px] outline-none text-[#cccccc] placeholder-[#666] w-40"
+                      onKeyDown={e => e.key === 'Enter' && handleScrapeWebsite()}
+                    />
+                    <button 
+                      onClick={handleScrapeWebsite}
+                      disabled={isScraping || !scrapeUrlInput.trim()}
+                      className="text-[10px] font-bold uppercase text-[#888] hover:text-[#fff] disabled:opacity-50 transition-colors"
+                    >
+                      {isScraping ? 'Scraping...' : 'Scrape'}
+                    </button>
+                  </div>
+
+                  {attachments.map((att, index) => (
+                    <div key={index} className="flex items-center gap-2 bg-[#1a1a1a] border border-[#444444] p-1 pr-3 rounded-sm shadow-sm group">
+                      <img src={att.url} alt={`Reference ${index}`} className="w-8 h-8 object-cover rounded-sm border border-[#333]" />
+                      <span className="text-[11px] font-medium text-[#aaa] whitespace-nowrap">Image {index + 1}</span>
+                      <button onClick={() => removeImage(index)} className="ml-2 hover:bg-[#333] p-1 rounded-sm text-[#888] hover:text-[#fff] transition-colors">
                         <X className="w-3 h-3" />
                       </button>
                     </div>
-                  )}
+                  ))}
                 </div>
               </div>
-              <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-start gap-3 border-t border-[#222] pt-6 mt-2">
                 <button
                   onClick={handleEnhancePrompt}
                   disabled={isEnhancing || isGenerating || !prompt.trim()}
-                  className="px-6 py-2 bg-transparent text-[#cccccc] border border-[#666666] text-[10px] font-bold uppercase tracking-[2px] hover:bg-[#333333] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 justify-center"
+                  className="px-6 py-2.5 bg-transparent text-[#cccccc] border border-[#555] rounded-sm text-[11px] font-bold uppercase tracking-wide hover:bg-[#222] hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                  {isEnhancing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                  {isEnhancing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                   {isEnhancing ? 'Enhancing...' : 'Enhance Prompt'}
                 </button>
                 <button
                   onClick={handleGenerate}
                   disabled={isGenerating || isEnhancing || !prompt.trim()}
-                  className="px-6 py-4 bg-[#222222] text-[#ffffff] border border-[#ffffff] text-[10px] font-bold uppercase tracking-[2px] hover:bg-[#444444] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 justify-center"
+                  className="px-8 py-2.5 bg-[#ffffff] text-[#000] rounded-sm text-[11px] font-bold uppercase tracking-wide hover:bg-[#e0e0e0] shadow-[0_0_15px_rgba(255,255,255,0.1)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                  {isGenerating ? <Loader2 className="w-3 h-3 animate-spin" /> : <PlayCircle className="w-3 h-3" />}
+                  {isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <PlayCircle className="w-3.5 h-3.5" />}
                   {isGenerating ? 'Generating...' : 'Generate Code'}
                 </button>
               </div>
             </div>
           </div>
 
-          <div className="px-10 py-4 bg-[#080808] border-b border-[#222222] flex items-center justify-between text-[11px] uppercase tracking-[1px] text-[#666666]">
+          <div className="px-6 sm:px-10 py-3 bg-[#0a0a0a] border-b border-[#222222] flex items-center justify-between text-[11px] font-medium uppercase tracking-wide text-[#666666]">
             <span>index.html</span>
-            <span>HTML + GSAP</span>
+            <span className="bg-[#1a1a1a] px-2 py-0.5 rounded-sm border border-[#333]">HTML + GSAP</span>
           </div>
-          <div className="flex-1 overflow-auto bg-[#080808] custom-scrollbar p-6">
+          <div className="flex-1 overflow-auto bg-[#0a0a0a] custom-scrollbar p-6">
             <Editor
               value={code}
               onValueChange={code => setCode(code)}
@@ -444,26 +688,26 @@ Rules for generating HTML:
         </section>
 
         {/* Output Pane */}
-        <section className="flex flex-col flex-1 bg-[#121212] overflow-hidden">
-          <div className="bg-[#080808] border-b border-[#222222] flex items-center justify-between text-[11px] uppercase tracking-[1px] font-bold">
-            <div className="flex">
+        <section className="flex flex-col flex-1 lg:w-1/2 bg-[#000] overflow-hidden border-t sm:border-t-0 sm:border-l border-[#222]">
+          <div className="bg-[#0a0a0a] border-b border-[#222222] flex items-center justify-between text-[11px] font-medium uppercase tracking-wide">
+            <div className="flex overflow-x-auto custom-scrollbar-hidden">
               <button 
                 onClick={() => setPreviewTab('live')} 
-                className={`flex items-center gap-2 px-8 py-5 border-b-2 transition-colors ${previewTab === 'live' ? 'text-white border-white bg-[#121212]' : 'text-[#666666] border-transparent hover:text-[#aaaaaa]'}`}
+                className={`flex items-center whitespace-nowrap gap-2 px-6 sm:px-8 py-4 border-b-[3px] transition-colors ${previewTab === 'live' ? 'text-white border-white bg-[#111]' : 'text-[#666666] border-transparent hover:text-[#aaaaaa] hover:bg-[#111]'}`}
               >
-                <MonitorPlay className="w-3 h-3" />
-                Live HTML Preview
+                <MonitorPlay className="w-4 h-4" />
+                Live Preview
               </button>
               <button 
                 onClick={() => setPreviewTab('mp4')} 
-                className={`flex items-center gap-2 px-8 py-5 border-b-2 transition-colors ${previewTab === 'mp4' ? 'text-white border-white bg-[#121212]' : 'text-[#666666] border-transparent hover:text-[#aaaaaa]'}`}
+                className={`flex items-center whitespace-nowrap gap-2 px-6 sm:px-8 py-4 border-b-[3px] transition-colors ${previewTab === 'mp4' ? 'text-white border-white bg-[#111]' : 'text-[#666666] border-transparent hover:text-[#aaaaaa] hover:bg-[#111]'}`}
               >
-                <Film className="w-3 h-3" />
-                Rendered MP4
+                <Film className="w-4 h-4" />
+                MP4 Output
               </button>
             </div>
             
-            <div className="px-6">
+            <div className="px-4 sm:px-6">
               {previewTab === 'mp4' && videoUrl && (
                 <a href={videoUrl} download={`hyperframes-${duration}s.mp4`} className="text-[#ffffff] hover:text-[#cccccc] flex items-center gap-2 transition-colors">
                   <Download className="w-4 h-4" />
@@ -474,21 +718,48 @@ Rules for generating HTML:
           </div>
           <div className="flex-1 flex flex-col overflow-hidden bg-[#000000] relative">
             {previewTab === 'live' ? (
-              <div className="w-full h-full flex flex-col items-center justify-center p-10">
-                {/* iFrame Container utilizing scaling trick */}
-                <div style={{ containerType: 'inline-size' }} className="w-full max-w-4xl aspect-[16/9] bg-black border border-[#222222] shadow-2xl relative overflow-hidden group">
+              <div className="w-full h-full flex flex-col items-center justify-center p-4 sm:p-10">
+                {/* iFrame Container utilizing JS-driven ResizeObserver scaling trick */}
+                <div ref={previewContainerRef} className="w-full max-w-5xl aspect-[16/9] bg-black border border-[#222222] shadow-2xl relative overflow-hidden group z-0">
                   <iframe
+                    ref={iframeRef}
                     key={iframeKey}
                     title="Live Render"
                     srcDoc={code}
                     className="absolute top-0 left-0 border-none origin-top-left"
-                    style={{ width: '1920px', height: '1080px', transform: 'scale(calc(100cqi / 1920))' }}
+                    style={{ width: '1920px', height: '1080px', transform: `scale(${iframeScale})` }}
                   />
+                </div>
+                {/* Custom Playback Controls */}
+                <div className="w-full max-w-5xl mt-4 bg-[#0a0a0a] border border-[#222] rounded-sm p-3 flex items-center gap-4 relative z-10">
+                  <button onClick={togglePlay} className="text-[#eee] hover:text-[#fff] transition-colors p-1 min-w-[24px] flex justify-center">
+                    {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}
+                  </button>
+                  
+                  <button onClick={resetAndPlay} className="text-[#888] hover:text-[#fff] transition-colors p-1" title="Rewind to Start">
+                    <RotateCcw className="w-4 h-4" />
+                  </button>
+
+                  <div className="flex-1 flex items-center gap-3">
+                    <span className="text-[10px] font-mono text-[#666] w-8 text-right">{currentTime.toFixed(1)}s</span>
+                    <input 
+                      type="range"
+                      min="0"
+                      max={duration}
+                      step="0.01"
+                      value={currentTime}
+                      onChange={handleSeek}
+                      className="flex-1 h-1.5 bg-[#333] rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full cursor-pointer"
+                    />
+                    <span className="text-[10px] font-mono text-[#666] w-8">{duration.toFixed(1)}s</span>
+                  </div>
+
                   <button 
                     onClick={() => setIframeKey(k => k + 1)}
-                    className="absolute bottom-4 right-4 bg-black/60 hover:bg-black/90 text-white px-4 py-2 text-[10px] uppercase font-bold tracking-[1px] transition-colors border border-[#444444]"
+                    className="text-[#888] hover:text-[#fff] transition-colors p-1 text-[10px] uppercase font-bold flex items-center gap-2 border-l border-[#333] pl-4"
+                    title="Full iFrame Reload"
                   >
-                    Replay Animation
+                    Reload Frame
                   </button>
                 </div>
               </div>

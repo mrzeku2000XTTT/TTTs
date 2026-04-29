@@ -49,6 +49,107 @@ async function startServer() {
   // Serve uploaded images securely
   app.use('/uploads', express.static(path.join(os.tmpdir(), 'uploads')));
 
+  app.post("/api/scrape-website", async (req, res) => {
+    try {
+      const { url } = req.body;
+      if (!url) {
+        return res.status(400).json({ error: "Missing url" });
+      }
+
+      // Add https protocol if missing
+      let targetUrl = url;
+      if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+        targetUrl = 'https://' + targetUrl;
+      }
+
+      const targetUrlObj = new URL(targetUrl);
+      const host = targetUrlObj.origin;
+      
+      let linksToScrape = [targetUrl];
+      
+      // Attempt to fetch raw HTML to parse out additional internal routes for more feature screenshots
+      try {
+        const htmlRes = await fetch(targetUrl, { follow: 3, timeout: 5000 } as any);
+        const htmlText = await htmlRes.text();
+        
+        const hrefRegex = /href=["'](\/[^"']+)["']/g;
+        let match;
+        const foundLinks = new Set<string>();
+        
+        while ((match = hrefRegex.exec(htmlText)) !== null) {
+          let link = match[1];
+          // Exclude assets, jumps
+          if (!link.includes('.') && link.length > 2 && !link.startsWith('/#')) {
+             // Trim trailing slash
+             if (link.endsWith('/')) link = link.slice(0, -1);
+             foundLinks.add(host + link);
+          }
+        }
+        
+        let uniqueLinks = Array.from(foundLinks).filter(l => l !== host && l !== host + '/');
+
+        // Grab top 3 additional unique pages to make 4 total screenshots. No fake fallbacks.
+        linksToScrape = [targetUrl, ...uniqueLinks.slice(0, 3)];
+      } catch (htmlErr) {
+        console.log("Could not parse sub-links. Defaulting to just target URL.", htmlErr);
+        linksToScrape = [targetUrl];
+      }
+
+      console.log(`Scraping ${linksToScrape.length} pages:`, linksToScrape);
+
+      // Scrape them concurrently using Microlink
+      const scrapeResults = await Promise.allSettled(
+        linksToScrape.map(async (pageUrl) => {
+          const microlinkUrl = `https://api.microlink.io?url=${encodeURIComponent(pageUrl)}&screenshot=true&waitForTimeout=2500&meta=false`;
+          const mlResponse = await fetch(microlinkUrl);
+          if (!mlResponse.ok) throw new Error("Microlink API failed");
+          const mlData = await mlResponse.json();
+          
+          if (!mlData?.data?.screenshot?.url) throw new Error("No screenshot returned");
+          const screenshotUrl = mlData.data.screenshot.url;
+
+          const response = await fetch(screenshotUrl);
+          if (!response.ok) throw new Error("Failed to download image");
+          
+          const arrayBuffer = await response.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          const base64 = buffer.toString('base64');
+          const mimeType = 'image/png';
+          
+          const fileName = `${uuidv4()}.png`;
+          const uploadDir = path.join(os.tmpdir(), 'uploads');
+          await fs.mkdir(uploadDir, { recursive: true });
+          const filePath = path.join(uploadDir, fileName);
+          await fs.writeFile(filePath, buffer);
+
+          return { url: `/uploads/${fileName}`, base64, mimeType, source: pageUrl };
+        })
+      );
+
+      let successfulImages = scrapeResults
+        .filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled')
+        .map(r => r.value);
+        
+      // Super simple de-duplication heuristic: if screenshots are the exact same byte length (+- 100 bytes to account for timestamps/micro changes), they are likely the same 404 SPA fallback page.
+      const uniqueImages = [];
+      for (const img of successfulImages) {
+        const isDuplicate = uniqueImages.some(uImg => Math.abs(uImg.base64.length - img.base64.length) < 500);
+        if (!isDuplicate) {
+          uniqueImages.push(img);
+        }
+      }
+
+      if (uniqueImages.length === 0) {
+        throw new Error("All page scrapes failed");
+      }
+
+      res.json({ images: uniqueImages });
+    } catch (e: any) {
+      console.error("Scrape failed", e);
+      res.status(500).json({ error: "Scrape failed", details: e.message });
+    }
+  });
+
   // API to render the hyperframe composition
   app.post("/api/render", async (req, res) => {
     const { html } = req.body;
