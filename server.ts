@@ -170,8 +170,7 @@ async function startServer() {
       const projectName = "project";
       const projectDir = path.join(tempDir, projectName);
 
-      // Initialize project. hyperframes init doesn't support an explicit path correctly so we run it from the temp folder
-      // Wait, hyperframes init creates a subfolder.
+      // Initialize project: hyperframes init creates a subfolder
       await execPromise(`npx -y hyperframes init ${projectName} --example blank --non-interactive`, { cwd: tempDir });
       
       // Overwrite the index.html
@@ -188,9 +187,7 @@ async function startServer() {
 
       console.log(`Rendering in ${projectDir}`);
       // Render the video
-      console.log(`Executing render...`);
       await execPromise(`npx -y hyperframes render --output out.mp4`, { cwd: projectDir });
-      console.log(`Render complete!`);
 
       const videoPath = path.join(projectDir, "out.mp4");
       
@@ -212,6 +209,11 @@ async function startServer() {
       // Cleanup on error
       fs.rm(tempDir, { recursive: true, force: true }).catch(console.error);
     }
+  });
+
+  // Handle unknown API routes with JSON instead of falling through to SPA fallback
+  app.all("/api/*", (req, res) => {
+    res.status(404).json({ error: `API route ${req.method} ${req.url} not found` });
   });
 
   // Vite middleware for development

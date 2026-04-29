@@ -115,7 +115,7 @@ export default function App() {
   const [isEnhancing, setIsEnhancing] = useState(false);
   
   // Image reference state
-  const [attachments, setAttachments] = useState<{url: string, base64: string, mimeType: string, source?: string}[]>([]);
+  const [attachments, setAttachments] = useState<{url: string, base64: string, mimeType: string, previewUrl?: string, source?: string}[]>([]);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [scrapeUrlInput, setScrapeUrlInput] = useState('');
   const [isScraping, setIsScraping] = useState(false);
@@ -158,7 +158,11 @@ export default function App() {
       }
 
       if (data.images && data.images.length > 0) {
-        setAttachments(prev => [...prev, ...data.images]);
+        const withPreview = data.images.map((img: any) => ({
+          ...img,
+          previewUrl: `data:${img.mimeType};base64,${img.base64}`
+        }));
+        setAttachments(prev => [...prev, ...withPreview]);
       }
     } catch (err: any) {
       console.error("Scraping failed:", err);
@@ -273,16 +277,30 @@ export default function App() {
           body: JSON.stringify({ image: base64Data, mimeType: file.type })
         });
         
-        let data;
         const textResponse = await res.text();
+        let data;
+        
+        if (!res.ok) {
+          try {
+            data = JSON.parse(textResponse);
+            throw new Error(data.error || data.details || `Upload failed with status ${res.status}`);
+          } catch (e: any) {
+            if (res.status === 413) {
+              throw new Error("Image is too large. Please use a smaller image (under 10MB).");
+            }
+            throw new Error(`Server returned error ${res.status}: ${textResponse.slice(0, 100)}`);
+          }
+        }
+
         try {
           data = JSON.parse(textResponse);
         } catch (e) {
-          throw new Error('Server returned an invalid response. This feature requires the backend server.');
+          throw new Error('Server returned an invalid response. If you are on a platform like Vercel, the backend is not running.');
         }
 
         if (data.url) {
-          setAttachments(prev => [...prev, { url: data.url, base64: base64Data, mimeType: file.type }]);
+          const previewUrl = `data:${file.type};base64,${base64Data}`;
+          setAttachments(prev => [...prev, { url: data.url, base64: base64Data, mimeType: file.type, previewUrl }]);
         } else {
           throw new Error(data.error || "Upload failed: No URL returned from server.");
         }
@@ -697,7 +715,7 @@ ${
                   {attachments.map((att, index) => (
                     <div key={index} className="flex items-center gap-3 bg-[#141414] border border-[#333] p-1.5 pr-4 rounded-sm shadow-lg group hover:border-[#555] transition-colors relative">
                       <div className="relative w-10 h-10 overflow-hidden rounded-sm border border-[#222]">
-                        <img src={att.url} alt={`Reference ${index}`} className="w-full h-full object-cover transition-transform group-hover:scale-110" />
+                        <img src={att.previewUrl || att.url} alt={`Reference ${index}`} className="w-full h-full object-cover transition-transform group-hover:scale-110" />
                       </div>
                       <div className="flex flex-col">
                         <span className="text-[10px] font-bold text-[#eee] uppercase tracking-wider">Ref {index + 1}</span>
