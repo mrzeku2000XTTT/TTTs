@@ -8,7 +8,6 @@ import os from "os";
 import { v4 as uuidv4 } from "uuid";
 import util from "util";
 import axios from "axios";
-import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -23,6 +22,16 @@ async function startServer() {
 
   // Cross-origin support
   app.use(cors());
+
+  // Health check early
+  app.get("/api/health", (req, res) => {
+    console.log("Health check requested");
+    res.json({ 
+      status: "ok", 
+      env: process.env.NODE_ENV,
+      time: new Date().toISOString()
+    });
+  });
 
   // Request logging middleware
   app.use((req, res, next) => {
@@ -227,14 +236,6 @@ async function startServer() {
     }
   });
 
-  // Basic health check
-  app.get("/api/health", (req, res) => {
-    res.json({ 
-      status: "ok", 
-      env: process.env.NODE_ENV,
-      time: new Date().toISOString()
-    });
-  });
 
   // Handle unknown API routes with JSON instead of falling through to SPA fallback
   app.all("/api/*", (req, res) => {
@@ -261,4 +262,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error("CRITICAL: Server failed to start:", err);
+  process.exit(1);
+});

@@ -10,7 +10,7 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "postinstall": "npx -y hyperframes browser ensure",
-    "start": "tsx server.ts"
+    "start": "npx tsx server.ts"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

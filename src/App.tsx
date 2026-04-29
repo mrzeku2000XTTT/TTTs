@@ -135,12 +135,13 @@ export default function App() {
           const data = await res.json();
           console.log("Backend connected successfully:", data);
         } else {
-          console.warn("Backend health check failed with status:", res.status);
-          setError("Warning: Backend services appear to be unreachable. This feature requires the full-stack server.");
+          const text = await res.text();
+          console.warn(`Backend health check failed. Status: ${res.status}, Body: ${text.slice(0, 50)}`);
+          setError(`Backend services are unreachable (Status ${res.status}). This app requires a full-stack server. If you see this in published mode, the server might not be starting.`);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Failed to connect to backend:", err);
-        setError("Backend Connection Error: The cinematic engine could not be initialized.");
+        setError(`Backend Connection Error: ${err.message || 'The cinematic engine could not be initialized.'}`);
       }
     };
     checkBackend();
