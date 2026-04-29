@@ -97,8 +97,8 @@ async function startServer() {
 
         // Grab top 3 additional unique pages to make 4 total screenshots. No fake fallbacks.
         linksToScrape = [targetUrl, ...uniqueLinks.slice(0, 3)];
-      } catch (htmlErr) {
-        console.log("Could not parse sub-links. Defaulting to just target URL.", htmlErr);
+      } catch (htmlErr: any) {
+        console.log("Could not parse sub-links. Defaulting to just target URL.", htmlErr.message);
         linksToScrape = [targetUrl];
       }
 

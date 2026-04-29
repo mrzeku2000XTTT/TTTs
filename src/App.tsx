@@ -129,6 +129,7 @@ export default function App() {
   const handleScrapeWebsite = async () => {
     if (!scrapeUrlInput) return;
     setIsScraping(true);
+    setError(null);
     let target = scrapeUrlInput;
     if (!target.startsWith('http')) {
       target = 'https://' + target;
@@ -260,6 +261,11 @@ export default function App() {
       
       setIsUploadingImage(true);
 
+      // Auto-update prompt if empty
+      if (prompt.trim() === '') {
+        setPrompt("A high-end cinematic product presentation showcasing this reference image with elegant 3D depth, kinetic typography, and a smooth voiceover breakdown.");
+      }
+
       try {
         const res = await fetch('/api/upload-image', {
           method: 'POST',
@@ -335,7 +341,10 @@ KEY TERMINOLOGY & STANDARDS TO DEMAND:
 
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
-        throw new Error("GEMINI_API_KEY is not defined. If you are deployed on Vercel, make sure to add it to your Environment Variables.");
+        const isVercel = typeof window !== 'undefined' && window.location.hostname.includes('vercel.app');
+        throw new Error(isVercel 
+          ? "GEMINI_API_KEY is missing in your Vercel Environment Variables. This app requires an AI key to enhance prompts." 
+          : "GEMINI_API_KEY is not defined. Ensure it is set in your environment configuration.");
       }
       const ai = new GoogleGenAI({ apiKey });
       const parts: any[] = [{ text: prompt }];
@@ -376,6 +385,8 @@ KEY TERMINOLOGY & STANDARDS TO DEMAND:
     try {
       let isUsingScrapedImages = attachments.length > 0;
       
+      const isVercel = typeof window !== 'undefined' && window.location.hostname.includes('vercel.app');
+
       const systemPrompt = `You are an expert Hyperframes composition creator. Hyperframes is an HTML-to-video framework.
 Rules for generating HTML:
 1. Return ONLY valid raw HTML. No markdown formatting, no \`\`\`html tags.
@@ -391,7 +402,16 @@ Rules for generating HTML:
 <script>
   window.__timelines = window.__timelines || {};
   const tl = gsap.timeline({ paused: true });
+  
+  // Helper for TTS Loading
+  function loadTTS(text, voice = "Brian") {
+    const audio = new Audio("https://api.streamelements.com/kappa/v2/speech?voice=" + voice + "&text=" + encodeURIComponent(text));
+    document.body.appendChild(audio);
+    return audio;
+  }
+
   // Add your gsap animations to 'tl' here
+  
   window.__timelines["main"] = tl;
   window.__hf = { duration: ${duration}, seek: (t) => { tl.seek(t); } };
   if (window.location.protocol !== 'file:') {
@@ -410,9 +430,9 @@ Rules for generating HTML:
      * Driving/Upbeat: \`https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3\`
      Set it to \`autoplay loop\`.
    - Choreograph your timeline hits (\`tl.to(...)\`) to visually pulse or transition along with the implied beat of the audio track you selected.
-${enableTTS ? `   - VOICEOVER TTS: The user enabled AI voiceover! You MUST write a compelling narrator script that matches the duration of the clip. To implement the TTS, insert an \`<audio>\` element formatted EXACTLY like this: \`<audio src="https://api.streamelements.com/kappa/v2/speech?voice=Brian&text={URL_ENCODED_SCRIPT_HERE}"></audio>\` (Do NOT add autoplay attribute).
-     * ⚡ CRITICAL: The \`text\` parameter MUST BE STRICTLY URL ENCODED! Replace all spaces with \`%20\`, commas with \`%2C\`, etc. 
-     * Example: \`<audio src="https://api.streamelements.com/kappa/v2/speech?voice=Brian&text=Welcome%20to%20the%20future%20of%20design%2E"></audio>\`` : ''}
+${enableTTS ? `   - VOICEOVER TTS: The user enabled AI voiceover! You MUST write a compelling narrator script. 
+     * IMPORTANT: Call the \`loadTTS(script)\` helper function inside your script tag!
+     * Example: \`const vo = loadTTS("Welcome to the cinematic experience."); tl.add(() => vo.play(), 0.5);\`` : ''}
 9. 1000X MOTION DESIGN RULES: 
    - KINETIC TYPOGRAPHY IS MANDATORY: You MUST write custom JS inside your script tag to split heading strings into individual \`<span>\` characters BEFORE animating. Example: \`const text = document.querySelector("#title"); text.innerHTML = text.textContent.split("").map(c => "<span style='display:inline-block; opacity:0;'>" + (c===" " ? "&nbsp;" : c) + "</span>").join(""); tl.fromTo("#title span", {opacity:0, y:50, rotationX:-90}, {opacity:1, y:0, rotationX:0, stagger:0.02, ease:"back.out(1.7)", duration:0.8})\`.
    - PARALLAX & MULTI-PLANE: Abstract your scenes into Foreground, Midground, and Background layers. Shift them on the Z-axis or animate their Y-axis at staggeringly different speeds (e.g. background moves -50px, foreground moves -150px) to simulate massive 3D camera depth!
@@ -424,13 +444,15 @@ ${enableTTS ? `   - VOICEOVER TTS: The user enabled AI voiceover! You MUST write
    - CINEMATIC TEXTURE: Inject a CSS pseudo-element overlay covering the body with subtle animated visual grain/noise and a vignette to make the pure HTML feel like a real camera lens!
 10. IMAGE & CAMERA MOVEMENT RULES:
 ${
-  isUsingScrapedImages 
+  attachments.length === 1 
+  ? `   - ⚡ SINGLE IMAGE FOCUS: The user provided exactly ONE high-quality reference image. You MUST make this image the heart of a powerful, single-scene Cinematic Flow. Animate it with a massive, slow, continuous "Gliding Camera" move (scale from 1.2 to 1 and slight pan) across the full ${duration} seconds. Layer multiple kinetic text reveals over it to tell the story.`
+  : isUsingScrapedImages 
   ? `   - IMPORTANT: The user has attached actual screenshot images of a website to use. DO NOT generate fake images with Pollinations AI. Instead, use ONLY the exact image URLs provided in the user prompt! Map them cleanly using \`<img src="..." style="width: 100%; height: 100%; object-fit: cover;" />\` into your scenes.
-   - ⚡ CRITICAL CAMERA REQUIREMENT: You MUST animate every single image continuously across the complete duration of its parent scene to simulate a cinematic camera move (Ken Burns style)! Example: \`tl.fromTo("#img1", { scale: 1.15, y: 50 }, { scale: 1, y: -50, duration: 4, ease: "none" },...)\` It should glide constantly, DO NOT let it sit still.`
+    - ⚡ CRITICAL CAMERA REQUIREMENT: You MUST animate every single image continuously across the complete duration of its parent scene to simulate a cinematic camera move (Ken Burns style)! Example: \`tl.fromTo("#img1", { scale: 1.15, y: 50 }, { scale: 1, y: -50, duration: 4, ease: "none" },...)\` It should glide constantly, DO NOT let it sit still.`
   : `   - If generating "8-10 HTML Slides" or any multi-scene layout, you MUST generate high-quality photography for EACH slide!
-   - To do this, insert an \`<img>\` tag into each slide. You MUST use the free Pollinations AI image generator API by setting the \`src\` exactly matching this pattern: \`https://image.pollinations.ai/prompt/{detailed_visual_description_URL_encoded}?width=1920&height=1080&nologo=true\`
-   - IMPORTANT: Replace \`{detailed_visual_description_URL_encoded}\` with a highly specific, unique, URL-encoded prompt reflecting that exact slide's content (e.g., \`a%20sleek%20cyberpunk%20terminal%20glowing%20in%20a%20dark%20room\`). This dynamically 'generates' a brand new, explicit AI image perfectly suited for that slide!
-   - ⚡ CRITICAL CAMERA REQUIREMENT: ALWAYS animate these background images to simulate a sweeping cinematic camera! Apply a massive, slow, continuous GSAP tween spanning the entire duration of the clip (e.g., pan on the Y axis, or slow scale from 1.2 to 1 over the full duration utilizing \`ease: "none"\` or \`ease: "sine.inOut"\`). Do not let images sit static.`
+    - To do this, insert an \`<img>\` tag into each slide. You MUST use the free Pollinations AI image generator API by setting the \`src\` exactly matching this pattern: \`https://image.pollinations.ai/prompt/{detailed_visual_description_URL_encoded}?width=1920&height=1080&nologo=true\`
+    - IMPORTANT: Replace \`{detailed_visual_description_URL_encoded}\` with a highly specific, unique, URL-encoded prompt reflecting that exact slide's content (e.g., \`a%20sleek%20cyberpunk%20terminal%20glowing%20in%20a%20dark%20room\`). This dynamically 'generates' a brand new, explicit AI image perfectly suited for that slide!
+    - ⚡ CRITICAL CAMERA REQUIREMENT: ALWAYS animate these background images to simulate a sweeping cinematic camera! Apply a massive, slow, continuous GSAP tween spanning the entire duration of the clip (e.g., pan on the Y axis, or slow scale from 1.2 to 1 over the full duration utilizing \`ease: "none"\` or \`ease: "sine.inOut"\`). Do not let images sit static.`
 }
 11. Make the layout aesthetically similar to a modern editorial layout. Omit generic blocks. Use high contrast, Helvetica / Arial. Return only the raw HTML text string.`;
 
@@ -466,7 +488,9 @@ ${
 
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
-        throw new Error("GEMINI_API_KEY is not defined. If you are deployed on Vercel, make sure to add it to your Environment Variables.");
+        throw new Error(isVercel 
+          ? "GEMINI_API_KEY is missing in your Vercel Environment Variables. This app requires an AI key to generate layouts." 
+          : "GEMINI_API_KEY is not defined. Ensure it is set in your environment configuration.");
       }
       const ai = new GoogleGenAI({ apiKey });
       const model = ai.getGenerativeModel({ 
