@@ -6,6 +6,7 @@ import path from "path";
 import os from "os";
 import { v4 as uuidv4 } from "uuid";
 import util from "util";
+import axios from "axios";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 
@@ -69,8 +70,14 @@ async function startServer() {
       
       // Attempt to fetch raw HTML to parse out additional internal routes for more feature screenshots
       try {
-        const htmlRes = await fetch(targetUrl, { follow: 3, timeout: 5000 } as any);
-        const htmlText = await htmlRes.text();
+        const htmlRes = await axios.get(targetUrl, { 
+          timeout: 5000, 
+          maxRedirects: 3,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          }
+        });
+        const htmlText = htmlRes.data;
         
         const hrefRegex = /href=["'](\/[^"']+)["']/g;
         let match;
@@ -101,18 +108,14 @@ async function startServer() {
       const scrapeResults = await Promise.allSettled(
         linksToScrape.map(async (pageUrl) => {
           const microlinkUrl = `https://api.microlink.io?url=${encodeURIComponent(pageUrl)}&screenshot=true&waitForTimeout=2500&meta=false`;
-          const mlResponse = await fetch(microlinkUrl);
-          if (!mlResponse.ok) throw new Error("Microlink API failed");
-          const mlData = await mlResponse.json();
+          const mlResponse = await axios.get(microlinkUrl);
+          const mlData = mlResponse.data;
           
           if (!mlData?.data?.screenshot?.url) throw new Error("No screenshot returned");
           const screenshotUrl = mlData.data.screenshot.url;
 
-          const response = await fetch(screenshotUrl);
-          if (!response.ok) throw new Error("Failed to download image");
-          
-          const arrayBuffer = await response.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
+          const response = await axios.get(screenshotUrl, { responseType: 'arraybuffer' });
+          const buffer = Buffer.from(response.data);
           const base64 = buffer.toString('base64');
           const mimeType = 'image/png';
           

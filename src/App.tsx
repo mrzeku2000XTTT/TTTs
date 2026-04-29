@@ -146,13 +146,22 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: target })
       });
+      
+      if (res.status === 404) {
+        throw new Error("Backend API not found (404). The Scrape feature requires the Express backend which is not available in static deployments like Vercel.");
+      }
+
       const data = await res.json();
+      if (res.status >= 400) {
+        throw new Error(data.error || data.details || `Scrape failed with status ${res.status}`);
+      }
+
       if (data.images && data.images.length > 0) {
         setAttachments(prev => [...prev, ...data.images]);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Scraping failed:", err);
-      alert("Failed to scrape website.");
+      setError(err.message || "Failed to scrape website.");
     } finally {
       setIsScraping(false);
       setScrapeUrlInput('');
@@ -244,6 +253,7 @@ export default function App() {
 
     const reader = new FileReader();
     reader.onload = async (event) => {
+      setError(null);
       const result = event.target?.result as string;
       // Extract base64 without data prefix
       const base64Data = result.split(',')[1];
@@ -262,16 +272,17 @@ export default function App() {
         try {
           data = JSON.parse(textResponse);
         } catch (e) {
-          throw new Error('Server returned an invalid response. If deployed on Vercel, the API wrapper is not running. Check the README for deployment details.');
+          throw new Error('Server returned an invalid response. This feature requires the backend server.');
         }
 
         if (data.url) {
           setAttachments(prev => [...prev, { url: data.url, base64: base64Data, mimeType: file.type }]);
         } else {
-          console.error("No URL returned from upload");
+          throw new Error(data.error || "Upload failed: No URL returned from server.");
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Upload failed", err);
+        setError(err.message || "Failed to upload image. Ensure the backend is running.");
       } finally {
         setIsUploadingImage(false);
       }
@@ -322,7 +333,11 @@ KEY TERMINOLOGY & STANDARDS TO DEMAND:
 
 - The output should read like a demanding Hollywood creative director dictating a precise, frame-by-frame choreography brief using the motion physics above!`;
 
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error("GEMINI_API_KEY is not defined. If you are deployed on Vercel, make sure to add it to your Environment Variables.");
+      }
+      const ai = new GoogleGenAI({ apiKey });
       const parts: any[] = [{ text: prompt }];
 
       if (attachments.length > 0) {
@@ -337,13 +352,14 @@ KEY TERMINOLOGY & STANDARDS TO DEMAND:
         parts[0].text += `\n\n[CONTEXT]: Examine the attached reference images or scraped website pages. Extract the brand colors, typography style, and mood to incorporate directly into the art direction brief! If directing a walkthrough, explicitly dictate the sequence using the provided images numbering (Image 1, Image 2, etc.).`;
       }
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: parts,
-        config: { systemInstruction: enhanceSystemPrompt },
+      const model = ai.getGenerativeModel({ 
+        model: "gemini-1.5-flash",
+        systemInstruction: enhanceSystemPrompt 
       });
 
-      const enhancedText = response.text || "";
+      const result = await model.generateContent(parts);
+      const response = await result.response;
+      const enhancedText = response.text() || "";
       setPrompt(enhancedText.trim());
     } catch (err: any) {
       console.error(err);
@@ -448,14 +464,19 @@ ${
         parts.push({ text: finalPrompt });
       }
 
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: parts,
-        config: { systemInstruction: systemPrompt },
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error("GEMINI_API_KEY is not defined. If you are deployed on Vercel, make sure to add it to your Environment Variables.");
+      }
+      const ai = new GoogleGenAI({ apiKey });
+      const model = ai.getGenerativeModel({ 
+        model: "gemini-2.0-flash-exp",
+        systemInstruction: systemPrompt 
       });
 
-      let html = response.text || "";
+      const response = await model.generateContent(parts);
+      const result = await response.response;
+      let html = result.text() || "";
       // Smart extraction to grab just the HTML code if the model wrapped it in markdown
       const match = html.match(/```(?:html)?\s*([\s\S]*?)```/);
       if (match) {
@@ -482,6 +503,10 @@ ${
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ html: code }),
       });
+
+      if (res.status === 404) {
+        throw new Error("Backend API not found (404). This feature requires the 'server.ts' backend which is not available in static deployments like Vercel. Try running locally or on a platform with persistent Node.js support.");
+      }
 
       if (!res.ok) {
         let errData;
@@ -544,6 +569,16 @@ ${
         <section className="flex flex-col flex-1 lg:w-1/2 bg-[#0c0c0c] overflow-y-auto lg:overflow-hidden">
           {/* AI Generation Box */}
           <div className="px-6 py-6 sm:px-10 sm:py-8 bg-[#0a0a0a] border-b border-[#222222] flex flex-col gap-6">
+            {error && (
+              <div className="bg-[#1a0c0c] border-l-2 border-[#ff4444] p-4 mb-2 flex items-start gap-3 group">
+                <div className="text-[#ff4444] mt-0.5"><X className="w-4 h-4" /></div>
+                <div className="flex-1">
+                  <p className="text-[12px] font-bold text-[#ff4444] uppercase tracking-wider mb-1">System Error</p>
+                  <p className="text-[13px] text-[#ccc] leading-relaxed">{error}</p>
+                </div>
+                <button onClick={() => setError(null)} className="text-[#666] hover:text-[#fff] transition-colors"><X className="w-4 h-4" /></button>
+              </div>
+            )}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <span className="text-[12px] font-medium tracking-wide text-[#888888]">Scene Generator</span>
               
@@ -636,11 +671,20 @@ ${
                   </div>
 
                   {attachments.map((att, index) => (
-                    <div key={index} className="flex items-center gap-2 bg-[#1a1a1a] border border-[#444444] p-1 pr-3 rounded-sm shadow-sm group">
-                      <img src={att.url} alt={`Reference ${index}`} className="w-8 h-8 object-cover rounded-sm border border-[#333]" />
-                      <span className="text-[11px] font-medium text-[#aaa] whitespace-nowrap">Image {index + 1}</span>
-                      <button onClick={() => removeImage(index)} className="ml-2 hover:bg-[#333] p-1 rounded-sm text-[#888] hover:text-[#fff] transition-colors">
-                        <X className="w-3 h-3" />
+                    <div key={index} className="flex items-center gap-3 bg-[#141414] border border-[#333] p-1.5 pr-4 rounded-sm shadow-lg group hover:border-[#555] transition-colors relative">
+                      <div className="relative w-10 h-10 overflow-hidden rounded-sm border border-[#222]">
+                        <img src={att.url} alt={`Reference ${index}`} className="w-full h-full object-cover transition-transform group-hover:scale-110" />
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-bold text-[#eee] uppercase tracking-wider">Ref {index + 1}</span>
+                        <span className="text-[9px] text-[#666] font-mono uppercase">{att.mimeType.split('/')[1]}</span>
+                      </div>
+                      <button 
+                        onClick={() => removeImage(index)} 
+                        className="ml-2 p-1.5 bg-[#222] hover:bg-[#ff4444] rounded-sm text-[#888] hover:text-white transition-all transform hover:rotate-90"
+                        title="Remove Image"
+                      >
+                        <X className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   ))}
