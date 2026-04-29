@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 import { createServer as createViteServer } from "vite";
 import { exec } from "child_process";
 import fs from "fs/promises";
@@ -18,9 +19,24 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-   app.use(express.json({ limit: '50mb' }));
+  console.log("Starting server in environment:", process.env.NODE_ENV);
+
+  // Cross-origin support
+  app.use(cors());
+
+  // Request logging middleware
+  app.use((req, res, next) => {
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+    next();
+  });
+
+  // Body parser must come before routes
+  app.use(express.json({ limit: '50mb' }));
 
   // API to upload image for reference and rendering
+  app.get("/api/upload-image", (req, res) => {
+    res.json({ message: "Ready for POST requests" });
+  });
   app.post("/api/upload-image", async (req, res) => {
     try {
       const { image, mimeType } = req.body;
@@ -213,7 +229,11 @@ async function startServer() {
 
   // Basic health check
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", environment: process.env.NODE_ENV || 'development' });
+    res.json({ 
+      status: "ok", 
+      env: process.env.NODE_ENV,
+      time: new Date().toISOString()
+    });
   });
 
   // Handle unknown API routes with JSON instead of falling through to SPA fallback
@@ -236,13 +256,9 @@ async function startServer() {
     });
   }
 
-  if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running on http://localhost:${PORT}`);
-    });
-  }
-
-  return app;
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
 }
 
-export const appPromise = startServer();
+startServer();

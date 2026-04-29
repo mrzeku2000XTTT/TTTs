@@ -126,6 +126,26 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
 
+  useEffect(() => {
+    // Check backend connection on mount
+    const checkBackend = async () => {
+      try {
+        const res = await fetch('/api/health');
+        if (res.ok) {
+          const data = await res.json();
+          console.log("Backend connected successfully:", data);
+        } else {
+          console.warn("Backend health check failed with status:", res.status);
+          setError("Warning: Backend services appear to be unreachable. This feature requires the full-stack server.");
+        }
+      } catch (err) {
+        console.error("Failed to connect to backend:", err);
+        setError("Backend Connection Error: The cinematic engine could not be initialized.");
+      }
+    };
+    checkBackend();
+  }, []);
+
   const handleScrapeWebsite = async () => {
     if (!scrapeUrlInput) return;
     setIsScraping(true);
@@ -282,7 +302,7 @@ export default function App() {
         
         if (!res.ok) {
           if (res.status === 404) {
-            throw new Error(`API Endpoint Not Found (404). The server backend might not be running correctly on this platform (e.g. Vercel). Ensure 'server.ts' is active.`);
+            throw new Error(`API Endpoint Not Found (404) at ${window.location.origin}. This app requires a full-stack server. If you see Vercel 404s, ensure your backend is correctly deployed.`);
           }
           try {
             data = JSON.parse(textResponse);
