@@ -134,14 +134,20 @@ export default function App() {
         if (res.ok) {
           const data = await res.json();
           console.log("Backend connected successfully:", data);
+          setError(null);
         } else {
           const text = await res.text();
-          console.warn(`Backend health check failed. Status: ${res.status}, Body: ${text.slice(0, 50)}`);
-          setError(`Backend services are unreachable (Status ${res.status}). This app requires a full-stack server. If you see this in published mode, the server might not be starting.`);
+          let serverError = text;
+          try {
+            const parsed = JSON.parse(text);
+            serverError = parsed.error || text;
+          } catch (e) {}
+          console.warn(`Backend health check failed. Status: ${res.status}, Body: ${text.slice(0, 100)}`);
+          setError(`Backend unreachable (Status ${res.status}): ${serverError.slice(0, 100)}. Ensure server.ts is properly deployed.`);
         }
       } catch (err: any) {
         console.error("Failed to connect to backend:", err);
-        setError(`Backend Connection Error: ${err.message || 'The cinematic engine could not be initialized.'}`);
+        setError(`Backend Connection Error: ${err.message || 'The cinematic engine could not be initialized.'} Ensure the server is running.`);
       }
     };
     checkBackend();

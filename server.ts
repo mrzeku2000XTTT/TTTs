@@ -23,15 +23,8 @@ async function startServer() {
   // Cross-origin support
   app.use(cors());
 
-  // Health check early
-  app.get("/api/health", (req, res) => {
-    console.log("Health check requested");
-    res.json({ 
-      status: "ok", 
-      env: process.env.NODE_ENV,
-      time: new Date().toISOString()
-    });
-  });
+  // Body parser must come before routes
+  app.use(express.json({ limit: '50mb' }));
 
   // Request logging middleware
   app.use((req, res, next) => {
@@ -39,8 +32,21 @@ async function startServer() {
     next();
   });
 
-  // Body parser must come before routes
-  app.use(express.json({ limit: '50mb' }));
+  // Health check early
+  app.get(["/api/health", "/api/health/"], (req, res) => {
+    console.log("Health check hit");
+    res.json({ 
+      status: "ok", 
+      env: process.env.NODE_ENV,
+      time: new Date().toISOString(),
+      node: process.version
+    });
+  });
+
+  // Root route for simple verification
+  app.get("/ping", (req, res) => {
+    res.send("pong");
+  });
 
   // API to upload image for reference and rendering
   app.get("/api/upload-image", (req, res) => {
