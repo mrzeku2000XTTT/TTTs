@@ -211,6 +211,11 @@ async function startServer() {
     }
   });
 
+  // Basic health check
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok", environment: process.env.NODE_ENV || 'development' });
+  });
+
   // Handle unknown API routes with JSON instead of falling through to SPA fallback
   app.all("/api/*", (req, res) => {
     res.status(404).json({ error: `API route ${req.method} ${req.url} not found` });
@@ -231,9 +236,13 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  }
+
+  return app;
 }
 
-startServer();
+export const appPromise = startServer();

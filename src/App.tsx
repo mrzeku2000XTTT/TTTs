@@ -281,6 +281,9 @@ export default function App() {
         let data;
         
         if (!res.ok) {
+          if (res.status === 404) {
+            throw new Error(`API Endpoint Not Found (404). The server backend might not be running correctly on this platform (e.g. Vercel). Ensure 'server.ts' is active.`);
+          }
           try {
             data = JSON.parse(textResponse);
             throw new Error(data.error || data.details || `Upload failed with status ${res.status}`);
@@ -288,6 +291,7 @@ export default function App() {
             if (res.status === 413) {
               throw new Error("Image is too large. Please use a smaller image (under 10MB).");
             }
+            if (e.message.includes('API Endpoint Not Found')) throw e;
             throw new Error(`Server returned error ${res.status}: ${textResponse.slice(0, 100)}`);
           }
         }
