@@ -14,45 +14,42 @@ dotenv.config();
 
 const execPromise = util.promisify(exec);
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+const app = express();
+const PORT = 3000;
 
-  console.log("Starting server in environment:", process.env.NODE_ENV);
+// Cross-origin support
+app.use(cors());
 
-  // Cross-origin support
-  app.use(cors());
+// Body parser must come before routes
+app.use(express.json({ limit: '50mb' }));
 
-  // Body parser must come before routes
-  app.use(express.json({ limit: '50mb' }));
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  next();
+});
 
-  // Request logging middleware
-  app.use((req, res, next) => {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
-    next();
+// Health check early
+app.get(["/api/health", "/api/health/"], (req, res) => {
+  console.log("Health check hit");
+  res.json({ 
+    status: "ok", 
+    env: process.env.NODE_ENV,
+    time: new Date().toISOString(),
+    node: process.version
   });
+});
 
-  // Health check early
-  app.get(["/api/health", "/api/health/"], (req, res) => {
-    console.log("Health check hit");
-    res.json({ 
-      status: "ok", 
-      env: process.env.NODE_ENV,
-      time: new Date().toISOString(),
-      node: process.version
-    });
-  });
+// Root route for simple verification
+app.get("/ping", (req, res) => {
+  res.send("pong");
+});
 
-  // Root route for simple verification
-  app.get("/ping", (req, res) => {
-    res.send("pong");
-  });
-
-  // API to upload image for reference and rendering
-  app.get("/api/upload-image", (req, res) => {
-    res.json({ message: "Ready for POST requests" });
-  });
-  app.post("/api/upload-image", async (req, res) => {
+// API to upload image for reference and rendering
+app.get("/api/upload-image", (req, res) => {
+  res.json({ message: "Ready for POST requests" });
+});
+app.post("/api/upload-image", async (req, res) => {
     try {
       const { image, mimeType } = req.body;
       if (!image || !mimeType) {
@@ -243,11 +240,12 @@ async function startServer() {
   });
 
 
-  // Handle unknown API routes with JSON instead of falling through to SPA fallback
-  app.all("/api/*", (req, res) => {
-    res.status(404).json({ error: `API route ${req.method} ${req.url} not found` });
-  });
+// Handle unknown API routes with JSON instead of falling through to SPA fallback
+app.all("/api/*", (req, res) => {
+  res.status(404).json({ error: `API route ${req.method} ${req.url} not found` });
+});
 
+async function startServer() {
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -263,12 +261,14 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  }
 }
 
-startServer().catch(err => {
-  console.error("CRITICAL: Server failed to start:", err);
-  process.exit(1);
-});
+// Start the setup but export the app immediately for Vercel
+startServer().catch(err => console.error("Setup failed:", err));
+
+export default app;

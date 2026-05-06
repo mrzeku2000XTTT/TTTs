@@ -11,7 +11,7 @@ import 'prismjs/components/prism-css';
 import 'prismjs/components/prism-javascript';
 import 'prismjs/themes/prism-dark.css'; // Dark theme
 import { Play, Loader2, PlayCircle, Download, Sparkles, ImagePlus, X, MonitorPlay, Film, Pause, RotateCcw } from 'lucide-react';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const DEFAULT_HTML = `<!doctype html>
 <html lang="en">
@@ -395,7 +395,7 @@ KEY TERMINOLOGY & STANDARDS TO DEMAND:
           ? "GEMINI_API_KEY is missing in your Vercel Environment Variables. This app requires an AI key to enhance prompts." 
           : "GEMINI_API_KEY is not defined. Ensure it is set in your environment configuration.");
       }
-      const ai = new GoogleGenAI({ apiKey });
+      const ai = new GoogleGenerativeAI(apiKey);
       const parts: any[] = [{ text: prompt }];
 
       if (attachments.length > 0) {
@@ -411,7 +411,7 @@ KEY TERMINOLOGY & STANDARDS TO DEMAND:
       }
 
       const model = ai.getGenerativeModel({ 
-        model: "gemini-1.5-flash",
+        model: "gemini-2.5-flash",
         systemInstruction: enhanceSystemPrompt 
       });
 
@@ -541,9 +541,9 @@ ${
           ? "GEMINI_API_KEY is missing in your Vercel Environment Variables. This app requires an AI key to generate layouts." 
           : "GEMINI_API_KEY is not defined. Ensure it is set in your environment configuration.");
       }
-      const ai = new GoogleGenAI({ apiKey });
+      const ai = new GoogleGenerativeAI(apiKey);
       const model = ai.getGenerativeModel({ 
-        model: "gemini-2.0-flash-exp",
+        model: "gemini-2.5-flash",
         systemInstruction: systemPrompt 
       });
 
